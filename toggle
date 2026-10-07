@@ -1,0 +1,7 @@
+#!/bin/sh
+# Показать или спрятать поиск. Через gdbus, потому что это быстро: питон с GTK
+# грузился бы на каждое нажатие. Если программа не запущена — запускаем её,
+# и она сразу откроется.
+gdbus call --session --dest dev.bogdan.Spotlight --object-path /dev/bogdan/Spotlight \
+    --method org.gtk.Actions.Activate toggle '[]' '{}' >/dev/null 2>&1 \
+    || exec python3 "$(dirname "$(readlink -f "$0")")/spotlight.py"
