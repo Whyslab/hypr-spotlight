@@ -469,6 +469,35 @@ class ResultList(Gtk.Box):
             child = child.get_next_sibling()
 
 
+class Catcher(Gtk.Window):
+    """Прозрачный слой на весь экран под островом: щелчок мимо острова —
+    закрыть. Пока остров открыт, клавиатура только у него (EXCLUSIVE), и
+    фокус больше не подскажет, что щёлкнули в другое окно. Полоса панели
+    сверху пропускает щелчки: кнопка поиска на ней сама закроет остров."""
+
+    def __init__(self, app, on_click):
+        super().__init__(application=app)
+        self.add_css_class("spotlight")
+        self.set_decorated(False)
+        LayerShell.init_for_window(self)
+        # Другое имя, чтобы layerrule с размытием его не задел: размывать
+        # весь экран на каждом кадре T460 не потянет.
+        LayerShell.set_namespace(self, "spotlight-catcher")
+        LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
+        for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM, LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
+            LayerShell.set_anchor(self, edge, True)
+        LayerShell.set_exclusive_zone(self, -1)
+        LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
+        self.set_hide_on_close(True)
+        # На отпускании: иначе слой исчезнет между нажатием и отпусканием, и
+        # отпускание без нажатия достанется окну под ним.
+        click = Gtk.GestureClick(button=0)     # любая кнопка мыши
+        click.connect("released", lambda *_: on_click())
+        self.add_controller(click)
+        self.connect("map", lambda *_: self.get_surface().set_input_region(
+            cairo.Region(cairo.RectangleInt(0, TOP, 1 << 15, 1 << 15))))
+
+
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Поиск")
@@ -487,6 +516,7 @@ class Window(Gtk.ApplicationWindow):
         self.set_hide_on_close(True)
         self.connect("close-request", self._on_close_request)
 
+        self.catcher = Catcher(app, self.close)
         self.search = Search()
         self.pending_key = None
         self.pending_shift = False
@@ -566,9 +596,14 @@ class Window(Gtk.ApplicationWindow):
         # продолжает с того места, где была.
         if self.get_visible():
             self.set_visible(False)
+        # Ловушка показывается раньше острова: в одном слое Hyprland кладёт
+        # показанное позже сверху, и остров окажется над ней.
+        self.catcher.set_visible(True)
         self.had_focus = False
         self.pending_key = None
-        LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.ON_DEMAND)
+        # Не ON_DEMAND: при нём Hyprland отдаёт клавиатуру окну под курсором,
+        # стоит сдвинуть мышь, — и остров закрывался, будто щёлкнули мимо.
+        LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.EXCLUSIVE)
         self.set_input_region(True)
         self.search.files.refresh()
         self.entry.set_text(text)
@@ -587,10 +622,12 @@ class Window(Gtk.ApplicationWindow):
             # что набрал сразу после Enter, ушло бы в пустоту.
             LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
             self.set_input_region(False)
+            self.catcher.set_visible(False)
 
     def _on_close_request(self, *_):
         self.stage.p.to = 0
         self.stage.p.snap()
+        self.catcher.set_visible(False)   # иначе невидимо ест щелчки по всему экрану
         return False      # hide_on_close спрячет, а не уничтожит
 
     def pose(self, p):
@@ -710,7 +747,8 @@ class Window(Gtk.ApplicationWindow):
             # GTK закончит со своим выделением.
             GLib.idle_add(self._cursor_to_end)
         elif self.had_focus and self.stage.is_open():
-            # Щёлкнул в другое окно — фокус ушёл, прячемся, как Spotlight.
+            # Фокус ушёл (щелчки мимо ловит Catcher, это запасной путь) —
+            # прячемся, как Spotlight.
             self.close()
 
     def activate_item(self, item: Item, shift: bool):
