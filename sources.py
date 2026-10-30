@@ -433,11 +433,15 @@ def url_for(text: str) -> str:
 
 
 def focus_workspace(ws: str) -> None:
-    """Switch workspace. A Lua config (Hyprland 0.57+) takes only hl.dsp.focus,
-    a .conf only `workspace N`; each rejects the other's form harmlessly."""
+    """Switch workspace. A Lua config (Hyprland 0.57+) takes only hl.dsp.focus;
+    a .conf only `workspace N`, and answers the Lua form "Invalid dispatcher".
+    The plain form follows only that answer: under Lua it would run as Lua code.
+    Only plain workspace names, so json.dumps makes a valid Lua string."""
+    if not re.fullmatch(r"[\w:+-]+", ws, re.ASCII):
+        return
     lua = subprocess.run(["hyprctl", "dispatch", f"hl.dsp.focus({{ workspace = {json.dumps(ws)} }})"],
                          capture_output=True, text=True, check=False)
-    if lua.stdout.strip() != "ok":
+    if "Invalid dispatcher" in lua.stdout:
         subprocess.run(["hyprctl", "dispatch", "workspace", ws],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
