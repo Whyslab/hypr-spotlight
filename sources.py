@@ -432,10 +432,19 @@ def url_for(text: str) -> str:
     return "https://" + text
 
 
+def focus_workspace(ws: str) -> None:
+    """Switch workspace. A Lua config (Hyprland 0.57+) takes only hl.dsp.focus,
+    a .conf only `workspace N`; each rejects the other's form harmlessly."""
+    lua = subprocess.run(["hyprctl", "dispatch", f"hl.dsp.focus({{ workspace = {json.dumps(ws)} }})"],
+                         capture_output=True, text=True, check=False)
+    if lua.stdout.strip() != "ok":
+        subprocess.run(["hyprctl", "dispatch", "workspace", ws],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
 def open_url(url: str) -> None:
     # Сначала воркспейс, потом ссылка — иначе браузер успевает утащить фокус.
-    subprocess.run(["hyprctl", "dispatch", "workspace", BROWSER_WORKSPACE],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    focus_workspace(BROWSER_WORKSPACE)
     spawn(["firefox", "--new-tab", url])
 
 
