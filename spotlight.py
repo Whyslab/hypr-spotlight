@@ -271,13 +271,12 @@ class Stage(Gtk.Widget):
             s.pop()
         shown = clamp((p - 0.3) / 0.5)
         if shown > 0:
-            k = lerp(0.96, 1, pc)
-            cx = self.get_width() / 2
+            # Не scale: при дробном масштабе GTK заново растрирует весь текст
+            # на каждом кадре, и открытие теряло кадры (33 мс вместо 17).
+            # Сдвиг на целые пиксели берёт буквы из готового кэша.
             s.push_opacity(shown)
             s.save()
-            s.translate(point(cx, TOP))
-            s.scale(k, k)
-            s.translate(point(-cx, -TOP))
+            s.translate(point(0, round(lerp(-8, 0, pc))))
             self.snapshot_child(self.content, s)
             s.restore()
             s.pop()
