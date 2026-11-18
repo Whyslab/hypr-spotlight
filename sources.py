@@ -21,6 +21,11 @@ from gi.repository import Gdk, Gio, GLib
 HOME = os.path.expanduser("~")
 PINS_FILE = os.path.join(GLib.get_user_config_dir(), "spotlight", "pinned.json")
 
+# Хелпер свёрнутых окон: развернуть окно программы вместо нового запуска.
+MINIMIZE = os.path.join(
+    os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local", "share"),
+    "minimize", "minimize")
+
 # Воркспейс, на котором всегда открыт браузер, и поисковик. Как в старой
 # строке поиска (~/.local/share/websearch): Google — потому что он же выбран
 # в самом браузере.
@@ -132,7 +137,50 @@ def subtitle(a: Gio.AppInfo) -> str:
     return "Программа"
 
 
+def window_classes(a: Gio.AppInfo) -> str:
+    """Возможные классы окна программы через «|»: StartupWMClass, имя
+    исполняемого файла из Exec и id .desktop. Хелпер свёрнутых окон проверит
+    их все разом (glob, без учёта регистра)."""
+    patterns: list[str] = []
+    wm_class = a.get_startup_wm_class() if hasattr(a, "get_startup_wm_class") else ""
+    if wm_class:
+        patterns.append(wm_class)
+    try:
+        words = shlex.split(a.get_commandline() or "")
+    except ValueError:
+        words = []
+    for word in words:
+        if word and not word.startswith("%"):
+            patterns.append(os.path.basename(word))
+            break
+    app_id = a.get_id() or ""
+    if app_id.endswith(".desktop"):
+        app_id = app_id[:-len(".desktop")]
+    if app_id:
+        patterns.append(app_id)
+    # Повторы не нужны, порядок — от самого точного к запасному.
+    return "|".join(dict.fromkeys(p for p in patterns if p))
+
+
+def unhide_app(a: Gio.AppInfo) -> bool:
+    """Если окно программы лежит на special:minimized — вернуть его и
+    сказать True (тогда запускать новое окно не нужно)."""
+    patterns = window_classes(a)
+    if not patterns or not os.path.exists(MINIMIZE):
+        return False
+    try:
+        r = subprocess.run([MINIMIZE, "launcher-unhide", patterns],
+                           capture_output=True, timeout=5)
+        return r.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
 def launch_app(a: Gio.AppInfo) -> None:
+    # Свёрнутое окно этой программы возвращаем, а не запускаем второе.
+    if unhide_app(a):
+        return
+
     # gio не знает kitty как терминал и для Terminal=true молча ничего не
     # запускает — собираем kitty -e сами.
     if a.get_boolean("Terminal"):
